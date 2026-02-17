@@ -46,7 +46,7 @@ jobs:
             npm test 2>&1 | tee test-output.log
           elif [ -f frontend/package.json ]; then
             cd frontend && npm test 2>&1 | tee ../test-output.log && cd ..
-          elif [ -f backend/tests ]; then
+          elif [ -d backend/tests ]; then
             echo "Running Python tests for backend..." > test-output.log
             python -m pytest backend/tests/ -v >> test-output.log 2>&1 || true
           else

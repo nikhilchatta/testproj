@@ -42,16 +42,27 @@ jobs:
         id: test_run
         continue-on-error: true
         run: |
-          if [ -f package.json ]; then
-            npm test 2>&1 | tee test-output.log
-          elif [ -f frontend/package.json ]; then
-            cd frontend && npm test 2>&1 | tee ../test-output.log && cd ..
-          elif [ -d backend/tests ]; then
-            echo "Running Python tests for backend..." > test-output.log
-            python -m pytest backend/tests/ -v >> test-output.log 2>&1 || true
-          else
-            echo "No tests found" > test-output.log
+          > test-output.log
+          
+          # Run frontend tests if they exist
+          if [ -f frontend/package.json ]; then
+            echo "=== Running Frontend Tests ===" | tee -a test-output.log
+            cd frontend && npm test 2>&1 | tee -a ../test-output.log && cd ..
           fi
+          
+          # Run backend tests if they exist
+          if [ -d backend/tests ]; then
+            echo "" | tee -a test-output.log
+            echo "=== Running Backend Tests ===" | tee -a test-output.log
+            python -m pytest backend/tests/ -v 2>&1 | tee -a test-output.log || true
+          fi
+          
+          # Check if any tests ran
+          TEST_COUNT=$(wc -l < test-output.log)
+          if [ "$TEST_COUNT" -lt 2 ]; then
+            echo "No tests found or executed" | tee -a test-output.log
+          fi
+          
           echo "TEST_EXIT_CODE=$?" >> $GITHUB_OUTPUT
 
       - name: Extract Error Logs

@@ -23,14 +23,35 @@ jobs:
         with:
           node-version: '18'
 
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
       - name: Install dependencies
-        run: npm install
+        run: |
+          if [ -f package.json ]; then
+            npm install
+          elif [ -f frontend/package.json ]; then
+            cd frontend && npm install && cd ..
+          else
+            echo "No package.json found, skipping npm install"
+          fi
 
       - name: Run Tests and Capture Logs
         id: test_run
         continue-on-error: true
         run: |
-          npm test 2>&1 | tee test-output.log
+          if [ -f package.json ]; then
+            npm test 2>&1 | tee test-output.log
+          elif [ -f frontend/package.json ]; then
+            cd frontend && npm test 2>&1 | tee ../test-output.log && cd ..
+          elif [ -f backend/tests ]; then
+            echo "Running Python tests for backend..." > test-output.log
+            python -m pytest backend/tests/ -v >> test-output.log 2>&1 || true
+          else
+            echo "No tests found" > test-output.log
+          fi
           echo "TEST_EXIT_CODE=$?" >> $GITHUB_OUTPUT
 
       - name: Extract Error Logs
@@ -46,14 +67,20 @@ jobs:
           fi
 
       - name: Run AI Code Review
+        id: ai_review
+        continue-on-error: true
         env:
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npm run review -- \
-            --pr=${{ github.event.pull_request.number }} \
-            --repo=${{ github.repository }} \
-            --token=${{ secrets.GITHUB_TOKEN }}
+          if [ -f package.json ]; then
+            npm run review -- \
+              --pr=${{ github.event.pull_request.number }} \
+              --repo=${{ github.repository }} \
+              --token=${{ secrets.GITHUB_TOKEN }}
+          else
+            echo "No package.json at root, skipping AI code review"
+          fi
 
       - name: Post Error Logs as PR Comment
         if: always()

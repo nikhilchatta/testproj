@@ -44,17 +44,20 @@ jobs:
         run: |
           > test-output.log
           
-          # Run frontend tests if they exist
-          if [ -f frontend/package.json ]; then
-            echo "=== Running Frontend Tests ===" | tee -a test-output.log
-            cd frontend && npm test 2>&1 | tee -a ../test-output.log && cd ..
+          # Run frontend Cypress tests if they exist
+          if [ -d frontend/cypress ]; then
+            echo "=== Running Frontend Cypress Tests ===" | tee -a test-output.log
+            cd frontend && npm install 2>&1 | tee -a ../test-output.log
+            npx cypress run 2>&1 | tee -a ../test-output.log && cd ..
           fi
           
           # Run backend tests if they exist
           if [ -d backend/tests ]; then
             echo "" | tee -a test-output.log
             echo "=== Running Backend Tests ===" | tee -a test-output.log
-            python -m pytest backend/tests/ -v 2>&1 | tee -a test-output.log || true
+            pip install pipenv > /dev/null 2>&1
+            cd backend && pipenv install --dev 2>&1 | tee -a ../test-output.log
+            pipenv run pytest tests/ -v 2>&1 | tee -a ../test-output.log && cd ..
           fi
           
           # Check if any tests ran

@@ -65,7 +65,6 @@ jobs:
             
             const comment = `## 🔍 Test Run Report
             
-**Test Exit Code:** ${testExitCode}
 
 ### 📋 Error Logs:
 \`\`\`

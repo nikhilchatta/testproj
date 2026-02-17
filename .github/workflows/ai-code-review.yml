@@ -1,112 +1,96 @@
-name: AI Code Review with Error Logs
+name: AI Code Review
 
 on:
   pull_request:
+    branches: [master]
     types: [opened, synchronize, reopened]
+    paths:
+      - '**.py'
+      - '**.scala'
+      - '**.tf'
+  push:
+    branches: [master]
 
 jobs:
   code-review:
+    if: github.event.pull_request.draft == false || github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
       contents: read
-      checks: read
-    
+      pull-requests: write
+      security-events: write  # required for uploading SARIF results
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+      - name: Install global CLI tools
+        run: npm install -g typescript tsx
 
-      - name: Install dependencies
+      - name: Install project dependencies
+        run: npm install
+
+      - name: Start Code Review Server
         run: |
-          if [ -f package.json ]; then
-            npm install
-          elif [ -f frontend/package.json ]; then
-            cd frontend && npm install && cd ..
-          else
-            echo "No package.json found, skipping npm install"
-          fi
-
-      - name: Run Tests and Capture Logs
-        id: test_run
-        continue-on-error: true
-        run: |
-          > test-output.log
-          
-          # Run frontend Cypress tests if they exist
-          if [ -d frontend/cypress ]; then
-            echo "=== Running Frontend Cypress Tests ===" | tee -a test-output.log
-            cd frontend && npm install 2>&1 | tee -a ../test-output.log
-            npx cypress run 2>&1 | tee -a ../test-output.log && cd ..
-          fi
-          
-          # Run backend tests if they exist
-          if [ -d backend/tests ]; then
-            echo "" | tee -a test-output.log
-            echo "=== Running Backend Tests ===" | tee -a test-output.log
-            pip install pipenv > /dev/null 2>&1
-            cd backend && pipenv install --dev 2>&1 | tee -a ../test-output.log
-            pipenv run pytest tests/ -v 2>&1 | tee -a ../test-output.log && cd ..
-          fi
-          
-          # Check if any tests ran
-          TEST_COUNT=$(wc -l < test-output.log)
-          if [ "$TEST_COUNT" -lt 2 ]; then
-            echo "No tests found or executed" | tee -a test-output.log
-          fi
-          
-          echo "TEST_EXIT_CODE=$?" >> $GITHUB_OUTPUT
-
-      - name: Extract Error Logs
-        id: extract_errors
-        run: |
-          if [ -f test-output.log ]; then
-            ERRORS=$(cat test-output.log | grep -i "error\|fail\|exception" || echo "No errors found in logs")
-            echo "error_logs<<EOF" >> $GITHUB_OUTPUT
-            echo "$ERRORS" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "error_logs=No test logs found" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run AI Code Review
-        id: ai_review
-        continue-on-error: true
+          npm run server &
+          # Wait until the health endpoint responds (up to 30 s)
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5001/api/health > /dev/null 2>&1; then
+              echo "Server is ready."
+              break
+            fi
+            echo "Waiting for server... ($i)"
+            sleep 1
+          done
         env:
-          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PORT: 5001
+
+      - name: Run Code Review
         run: |
-          if [ -f package.json ]; then
-            npm run review -- \
-              --pr=${{ github.event.pull_request.number }} \
-              --repo=${{ github.repository }} \
-              --token=${{ secrets.GITHUB_TOKEN }}
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only origin/master...HEAD \
+              | grep -E '\.(py|scala|tf)$' || true)
           else
-            echo "No package.json at root, skipping AI code review"
+            # On push to master, review files changed in the last commit
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD \
+              | grep -E '\.(py|scala|tf)$' || true)
           fi
 
-      - name: Post Error Logs as PR Comment
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No reviewable code files changed."
+            # Write an empty but valid SARIF so the upload step never fails
+            cat > code-review-results.sarif <<'SARIF'
+          {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{ "tool": { "driver": { "name": "AI Code Review", "rules": [] } }, "results": [] }]
+          }
+          SARIF
+            exit 0
+          fi
+
+          echo "Files to review:"
+          echo "$CHANGED_FILES"
+
+          npx tsx scripts/ci-review.ts \
+            --threshold 65 \
+            --fail-on-critical \
+            --fail-on-high \
+            --format sarif \
+            --output code-review-results.sarif \
+            $CHANGED_FILES
+        env:
+          CODE_REVIEW_API_URL: http://localhost:5001/api
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Upload SARIF results
         if: always()
-        uses: actions/github-script@v7
+        uses: github/codeql-action/upload-sarif@v2
         with:
-          script: >-
-            const errorLogs = "${{ steps.extract_errors.outputs.error_logs }}";
-            const testExitCode = "${{ steps.test_run.outputs.TEST_EXIT_CODE }}";
-            const comment = "## 🔍 Test Run Report\n\n**Test Exit Code:** " + testExitCode + "\n\n### 📋 Error Logs:\n```\n" + errorLogs + "\n```\n\n---\n*Generated by AI Code Review Assistant*";
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+          sarif_file: code-review-results.sarif

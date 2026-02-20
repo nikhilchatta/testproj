@@ -2,95 +2,24 @@ name: AI Code Review
 
 on:
   pull_request:
-    branches: [master]
-    types: [opened, synchronize, reopened]
-    paths:
-      - '**.py'
-      - '**.scala'
-      - '**.tf'
-  push:
-    branches: [master]
+    types: [opened, reopened, synchronize]
 
 jobs:
-  code-review:
-    if: github.event.pull_request.draft == false || github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      security-events: write  # required for uploading SARIF results
+  ai-code-review-gate:
+    # Points to the reusable workflow hosted in the central AI-CodeReview-Assistant repo.
+    # Replace YOUR_ORG with your GitHub organisation or username.
+    uses: nikhilchatta/AI-CodeReview-Assistant/.github/workflows/ai-code-review.yml@main
 
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+    with:
+      # Maximum number of changed files to send for review (default: 20)
+      max_files: 20
 
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
+      # File extensions to review — comma-separated, no spaces (default shown below)
+      file_extensions: .py,.ts,.tsx,.js,.jsx,.scala,.sql,.tf
 
-      - name: Install global CLI tools
-        run: npm install -g typescript tsx
+      # Job timeout in minutes (default: 15)
+      timeout_minutes: 15
 
-      - name: Install project dependencies
-        run: npm install
-
-      - name: Start Code Review Server
-        run: |
-          npm run server &
-          # Wait until the health endpoint responds (up to 30 s)
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:5001/api/health > /dev/null 2>&1; then
-              echo "Server is ready."
-              break
-            fi
-            echo "Waiting for server... ($i)"
-            sleep 1
-          done
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          PORT: 5001
-
-      - name: Run Code Review
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CHANGED_FILES=$(git diff --name-only origin/master...HEAD \
-              | grep -E '\.(py|scala|tf)$' || true)
-          else
-            # On push to master, review files changed in the last commit
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD \
-              | grep -E '\.(py|scala|tf)$' || true)
-          fi
-
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "No reviewable code files changed."
-            # Write an empty but valid SARIF so the upload step never fails
-            cat > code-review-results.sarif <<'SARIF'
-          {
-            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            "version": "2.1.0",
-            "runs": [{ "tool": { "driver": { "name": "AI Code Review", "rules": [] } }, "results": [] }]
-          }
-          SARIF
-            exit 0
-          fi
-
-          echo "Files to review:"
-          echo "$CHANGED_FILES"
-
-          npx tsx scripts/ci-review.ts \
-            --threshold 65 \
-            --fail-on-critical \
-            --fail-on-high \
-            --format sarif \
-            --output code-review-results.sarif \
-            $CHANGED_FILES
-        env:
-          CODE_REVIEW_API_URL: http://localhost:5001/api
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-      - name: Upload SARIF results
-        if: always()
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: code-review-results.sarif
+    secrets:
+      AI_AGENT_API_URL: ${{ secrets.AI_AGENT_API_URL }}
+      AI_AGENT_API_KEY: ${{ secrets.AI_AGENT_API_KEY }}

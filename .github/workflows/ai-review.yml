@@ -25,6 +25,10 @@ jobs:
     # Replace YOUR_ORG with your GitHub organisation or username.
     uses: nikhilchatta/AI-CodeReview-Assistant/.github/workflows/ai-code-review.yml@main
 
+    permissions:
+      contents: read
+      pull-requests: write
+
     with:
       # Maximum number of changed files to send for review (default: 20)
       max_files: 20

@@ -19,6 +19,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+permissions:
+  pull-requests: write
+  contents: read
+
 jobs:
   ai-code-review-gate:
     # Points to the reusable workflow hosted in the central AI-CodeReview-Assistant repo.

@@ -1,18 +1,3 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# AI Code Review Caller Template
-#
-# Copy this file into any repository that should be gated by AI code review.
-# Rename it to: .github/workflows/ai-review.yml
-#
-# Prerequisites — add these to the repository's GitHub Secrets:
-#   AI_AGENT_API_URL  : Base URL of the AWS-hosted AI agent backend
-#                       (e.g. https://review.yourdomain.com or http://EC2-IP:80)
-#   AI_AGENT_API_KEY  : API key accepted by the backend (x-api-key header)
-#
-# Branch protection — in the repository settings, add "AI Code Review Gate"
-# as a required status check under Settings > Branches > Branch protection rules.
-# ─────────────────────────────────────────────────────────────────────────────
-
 name: AI Code Review
 
 on:
@@ -21,24 +6,14 @@ on:
 
 jobs:
   ai-code-review-gate:
-    # Points to the reusable workflow hosted in the central AI-CodeReview-Assistant repo.
-    # Replace YOUR_ORG with your GitHub organisation or username.
     uses: nikhilchatta/AI-CodeReview-Assistant/.github/workflows/ai-code-review.yml@main
-
     permissions:
       contents: read
       pull-requests: write
-
     with:
-      # Maximum number of changed files to send for review (default: 20)
       max_files: 20
-
-      # File extensions to review — comma-separated, no spaces (default shown below)
       file_extensions: .py,.ts,.tsx,.js,.jsx,.scala,.sql,.tf
-
-      # Job timeout in minutes (default: 15)
       timeout_minutes: 15
-
     secrets:
       AI_AGENT_API_URL: ${{ secrets.AI_AGENT_API_URL }}
       AI_AGENT_API_KEY: ${{ secrets.AI_AGENT_API_KEY }}
